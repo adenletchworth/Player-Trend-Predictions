@@ -1,18 +1,16 @@
 import torch
-import torch.nn as nn
-import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import TimeSeriesSplit
+import torch.nn as nn
+import torch.optim as optim
 
-# Check if CUDA is available and set the default device accordingly
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Define the dataset class
-class CustomDataset(Dataset):
+class SteamDataset(Dataset):
     def __init__(self, X, y):
-        self.X = torch.tensor(X, dtype=torch.float32).to(device)  # Move tensors to the device
+        self.X = torch.tensor(X, dtype=torch.float32).to(device)
         self.y = torch.tensor(y, dtype=torch.float32).to(device)
 
     def __len__(self):
@@ -21,7 +19,6 @@ class CustomDataset(Dataset):
     def __getitem__(self, index):
         return self.X[index], self.y[index]
 
-# Function to prepare data and create sequences
 def prepare_data(csv_file, N):
     data = pd.read_csv(csv_file)
     data.sort_values('date', inplace=True)
@@ -40,41 +37,30 @@ def prepare_data(csv_file, N):
     X, y = create_sequences(data, N)
     return X, y
 
-# Set sequence length and prepare data
 N = 12
 X, y = prepare_data('/kaggle/input/steam-data-1/clean_data.csv', N)
 
-# Model definition
 class LSTMModel(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers, output_size, dropout_prob=0.1):
         super(LSTMModel, self).__init__()
-        # Enable bidirectional LSTM
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, 
                             batch_first=True, dropout=dropout_prob, 
                             bidirectional=True).to(device)
-        self.fc = nn.Linear(hidden_size * 2, output_size).to(device)  # Adjust linear layer input size
+        self.fc = nn.Linear(hidden_size * 2, output_size).to(device)
         self.num_layers = num_layers
         self.hidden_size = hidden_size
 
     def forward(self, x):
-        # Initialize hidden and cell states for both directions
-        h0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size).to(device)  # Multiplied by 2 for bidirectional
+        h0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size).to(device)
         c0 = torch.zeros(self.num_layers * 2, x.size(0), self.hidden_size).to(device)
         out, _ = self.lstm(x, (h0, c0))
-        
-        # Concatenate the outputs from the last forward and the first reverse elements
-        # out[:, -1, :self.hidden_size] gives the last forward layer output
-        # out[:, 0, self.hidden_size:] gives the first reverse layer output
         out_forward = out[:, -1, :self.hidden_size]
         out_reverse = out[:, 0, self.hidden_size:]
         out_concatenated = torch.cat((out_forward, out_reverse), dim=1)
-
-        # Pass the concatenated output through the fully connected layer
         out = self.fc(out_concatenated)
         return out
 
 
-# Time series cross-validation setup
 tscv = TimeSeriesSplit(n_splits=5)
 total_rmse = 0
 
@@ -86,8 +72,8 @@ for fold, (train_index, test_index) in enumerate(tscv.split(X)):
     X_train, X_test = X[train_index], X[test_index]
     y_train, y_test = y[train_index], y[test_index]
 
-    train_dataset = CustomDataset(X_train, y_train)
-    test_dataset = CustomDataset(X_test, y_test)
+    train_dataset = SteamDataset(X_train, y_train)
+    test_dataset = SteamDataset(X_test, y_test)
 
     train_loader = DataLoader(dataset=train_dataset, batch_size=10, shuffle=False)
     test_loader = DataLoader(dataset=test_dataset, batch_size=10, shuffle=False)
@@ -127,7 +113,7 @@ for fold, (train_index, test_index) in enumerate(tscv.split(X)):
         if average_eval_loss < best_loss:
             best_loss = average_eval_loss
             epochs_no_improve = 0
-            torch.save(model.state_dict(), 'best_model.pth')  # Save the best model
+            torch.save(model.state_dict(), 'best_model.pth') 
         else:
             epochs_no_improve += 1
             if epochs_no_improve >= patience:
